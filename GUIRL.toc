@@ -1,8 +1,8 @@
-## Interface: 110205
+## Interface: 120001, 120000, 50503, 38000, 20505, 11508
 ## Title: Gold used In Riad Loser
 ## Author: Hypricon
 ## Notes: Tracks consumable costs using Auctionator prices.
-## Version: 0.1.0
+## Version: 1.0.0
 ## SavedVariables: GUIRL_DB, CUOR_DB
 
 GUIRL_Database.lua
