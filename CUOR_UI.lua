@@ -3,9 +3,28 @@ CUOR = CUOR or {}
 local ADDON_NAME = ...
 local frame
 local RefreshUI
+local eventFrame
 local activeConsumables = {}
 local trackedItemIDs = {}
-local wasInRaidInstance = false
+local POLL_INTERVAL_SECONDS = 0.5
+local MIN_FRAME_WIDTH = 520
+local COLUMN_GAP = 6
+
+local COLUMN_WIDTHS = {
+    name = 186,
+    qty = 40,
+    price = 105,
+    total = 105,
+}
+
+local function GetColumnPositions()
+    local xName = 0
+    local xQty = xName + COLUMN_WIDTHS.name + COLUMN_GAP
+    local xPrice = xQty + COLUMN_WIDTHS.qty + COLUMN_GAP
+    local xTotal = xPrice + COLUMN_WIDTHS.price + COLUMN_GAP
+
+    return xName, xQty, xPrice, xTotal
+end
 
 local function FormatMoney(copper)
     if not copper or copper <= 0 then
@@ -43,24 +62,6 @@ local function TryAuctionatorPrice(itemID, itemLink)
     return nil
 end
 
-local function TryTSMPrice(itemID)
-    if not CUOR.Settings.allowTSMFallback then
-        return nil
-    end
-
-    if not TSM_API or not TSM_API.GetCustomPriceValue or not itemID then
-        return nil
-    end
-
-    local itemString = "i:" .. tostring(itemID)
-    local ok, value = pcall(TSM_API.GetCustomPriceValue, "dbmarket", itemString)
-    if ok and type(value) == "number" and value > 0 then
-        return value
-    end
-
-    return nil
-end
-
 local function RebuildConsumableIndexes()
     activeConsumables = {}
     trackedItemIDs = {}
@@ -73,38 +74,92 @@ local function RebuildConsumableIndexes()
     end
 end
 
-local function IsInRaidInstance()
-    local inInstance, instanceType = IsInInstance()
-    return inInstance and instanceType == "raid"
-end
-
-local function IsTrackingAllowedNow()
-    if CUOR.Settings.trackInRaidOnly then
-        return IsInRaidInstance()
+local function ExtractItemIDFromLink(itemLink)
+    if not itemLink or type(itemLink) ~= "string" then
+        return nil
     end
 
-    return true
+    local itemID = string.match(itemLink, "item:(%d+)")
+    if itemID then
+        return tonumber(itemID)
+    end
+
+    return nil
+end
+
+local function GetBagSlotCount(bagID)
+    if C_Container and C_Container.GetContainerNumSlots then
+        return C_Container.GetContainerNumSlots(bagID) or 0
+    end
+
+    if GetContainerNumSlots then
+        return GetContainerNumSlots(bagID) or 0
+    end
+
+    return 0
+end
+
+local function GetBagItemID(bagID, slotID)
+    if C_Container and C_Container.GetContainerItemID then
+        return C_Container.GetContainerItemID(bagID, slotID)
+    end
+
+    if GetContainerItemID then
+        return GetContainerItemID(bagID, slotID)
+    end
+
+    if GetContainerItemLink then
+        local itemLink = GetContainerItemLink(bagID, slotID)
+        return ExtractItemIDFromLink(itemLink)
+    end
+
+    return nil
+end
+
+local function GetBagItemStackCount(bagID, slotID)
+    if C_Container and C_Container.GetContainerItemInfo then
+        local slotInfo = C_Container.GetContainerItemInfo(bagID, slotID)
+        if slotInfo and slotInfo.stackCount and slotInfo.stackCount > 0 then
+            return slotInfo.stackCount
+        end
+    end
+
+    if GetContainerItemInfo then
+        local _, itemCount = GetContainerItemInfo(bagID, slotID)
+        if itemCount and itemCount > 0 then
+            return itemCount
+        end
+    end
+
+    return 1
 end
 
 local function GetTrackedBagCounts()
     local trackedCounts = {}
 
-    for bagID = 0, (NUM_BAG_SLOTS or 4) do
-        local slotCount = 0
-        if C_Container and C_Container.GetContainerNumSlots then
-            slotCount = C_Container.GetContainerNumSlots(bagID) or 0
+    if GetItemCount then
+        for itemID in pairs(trackedItemIDs) do
+            trackedCounts[itemID] = GetItemCount(itemID) or 0
         end
 
+        return trackedCounts
+    end
+
+    if C_Item and C_Item.GetItemCount then
+        for itemID in pairs(trackedItemIDs) do
+            trackedCounts[itemID] = C_Item.GetItemCount(itemID, false, false, false) or 0
+        end
+
+        return trackedCounts
+    end
+
+    for bagID = 0, (NUM_BAG_SLOTS or 4) do
+        local slotCount = GetBagSlotCount(bagID)
+
         for slotID = 1, slotCount do
-            local itemID = C_Container and C_Container.GetContainerItemID and C_Container.GetContainerItemID(bagID, slotID)
+            local itemID = GetBagItemID(bagID, slotID)
             if itemID and trackedItemIDs[itemID] then
-                local stackCount = 1
-                if C_Container and C_Container.GetContainerItemInfo then
-                    local slotInfo = C_Container.GetContainerItemInfo(bagID, slotID)
-                    if slotInfo and slotInfo.stackCount and slotInfo.stackCount > 0 then
-                        stackCount = slotInfo.stackCount
-                    end
-                end
+                local stackCount = GetBagItemStackCount(bagID, slotID)
 
                 trackedCounts[itemID] = (trackedCounts[itemID] or 0) + stackCount
             end
@@ -118,10 +173,23 @@ local function ResetUsageCounts()
     CUOR_DB.usageCounts = {}
 end
 
+local function ResetTrackedData()
+    if not CUOR_DB then
+        return
+    end
+
+    ResetUsageCounts()
+    RebuildConsumableIndexes()
+    CUOR_DB.lastBagSnapshot = GetTrackedBagCounts()
+    RefreshUI()
+end
+
 local function UpdateUsageFromBagDelta()
     if not CUOR_DB or not CUOR_DB.usageCounts then
         return
     end
+
+    RebuildConsumableIndexes()
 
     local currentCounts = GetTrackedBagCounts()
 
@@ -130,14 +198,13 @@ local function UpdateUsageFromBagDelta()
         return
     end
 
-    local trackingAllowed = IsTrackingAllowedNow()
     local changed = false
 
     for itemID in pairs(trackedItemIDs) do
         local previousCount = CUOR_DB.lastBagSnapshot[itemID] or 0
         local currentCount = currentCounts[itemID] or 0
 
-        if trackingAllowed and currentCount < previousCount then
+        if currentCount < previousCount then
             local consumedAmount = previousCount - currentCount
             CUOR_DB.usageCounts[itemID] = (CUOR_DB.usageCounts[itemID] or 0) + consumedAmount
             changed = true
@@ -152,13 +219,6 @@ local function UpdateUsageFromBagDelta()
 end
 
 local function HandleRaidStateTransition()
-    local inRaidInstance = IsInRaidInstance()
-
-    if CUOR.Settings.autoResetOnRaidEnter and inRaidInstance and not wasInRaidInstance then
-        ResetUsageCounts()
-    end
-
-    wasInRaidInstance = inRaidInstance
     CUOR_DB.lastBagSnapshot = GetTrackedBagCounts()
 
     if frame and frame:IsShown() then
@@ -210,41 +270,41 @@ local function GetItemPrice(itemID)
         return price, "Auctionator"
     end
 
-    local tsmPrice = TryTSMPrice(itemID)
-    if tsmPrice then
-        return tsmPrice, "TSM"
-    end
-
     return 0, "no price"
 end
 
-local function EnsureRows()
+local function EnsureRows(requiredRows)
     frame.rows = frame.rows or {}
 
-    local requiredRows = #activeConsumables
+    local xName, xQty, xPrice, xTotal = GetColumnPositions()
+
     while #frame.rows < requiredRows do
         local row = CreateFrame("Frame", nil, frame.content)
         row:SetSize(frame.content:GetWidth(), CUOR.Settings.rowHeight)
 
         row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        row.nameText:SetPoint("LEFT", row, "LEFT", 0, 0)
+        row.nameText:SetPoint("LEFT", row, "LEFT", xName, 0)
         row.nameText:SetJustifyH("LEFT")
-        row.nameText:SetWidth(170)
+        row.nameText:SetWidth(COLUMN_WIDTHS.name)
+        row.nameText:SetWordWrap(false)
 
         row.qtyText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.qtyText:SetPoint("LEFT", row.nameText, "RIGHT", 8, 0)
-        row.qtyText:SetWidth(50)
+        row.qtyText:SetPoint("LEFT", row, "LEFT", xQty, 0)
+        row.qtyText:SetWidth(COLUMN_WIDTHS.qty)
         row.qtyText:SetJustifyH("RIGHT")
+        row.qtyText:SetWordWrap(false)
 
         row.priceText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.priceText:SetPoint("LEFT", row.qtyText, "RIGHT", 8, 0)
-        row.priceText:SetWidth(100)
+        row.priceText:SetPoint("LEFT", row, "LEFT", xPrice, 0)
+        row.priceText:SetWidth(COLUMN_WIDTHS.price)
         row.priceText:SetJustifyH("RIGHT")
+        row.priceText:SetWordWrap(false)
 
         row.totalText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        row.totalText:SetPoint("LEFT", row.priceText, "RIGHT", 8, 0)
-        row.totalText:SetWidth(100)
+        row.totalText:SetPoint("LEFT", row, "LEFT", xTotal, 0)
+        row.totalText:SetWidth(COLUMN_WIDTHS.total)
         row.totalText:SetJustifyH("RIGHT")
+        row.totalText:SetWordWrap(false)
 
         frame.rows[#frame.rows + 1] = row
     end
@@ -256,12 +316,21 @@ function RefreshUI()
     end
 
     RebuildConsumableIndexes()
-    EnsureRows()
+
+    local displayConsumables = {}
+    for _, consumable in ipairs(activeConsumables) do
+        local quantityUsed = CUOR_DB and CUOR_DB.usageCounts and CUOR_DB.usageCounts[consumable.itemID] or 0
+        if quantityUsed > 0 then
+            displayConsumables[#displayConsumables + 1] = consumable
+        end
+    end
+
+    EnsureRows(#displayConsumables)
 
     local yOffset = -2
     local grandTotal = 0
 
-    for index, consumable in ipairs(activeConsumables) do
+    for index, consumable in ipairs(displayConsumables) do
         local row = frame.rows[index]
         local itemName = GetItemDisplayName(consumable)
         local quantityUsed = CUOR_DB and CUOR_DB.usageCounts and CUOR_DB.usageCounts[consumable.itemID] or 0
@@ -287,7 +356,7 @@ function RefreshUI()
         row:Show()
     end
 
-    for index = #activeConsumables + 1, #frame.rows do
+    for index = #displayConsumables + 1, #frame.rows do
         frame.rows[index]:Hide()
     end
 
@@ -297,6 +366,10 @@ end
 local function BuildUI()
     if frame then
         return
+    end
+
+    if not CUOR.Settings.frameWidth or CUOR.Settings.frameWidth < MIN_FRAME_WIDTH then
+        CUOR.Settings.frameWidth = MIN_FRAME_WIDTH
     end
 
     frame = CreateFrame("Frame", "CUOR_MainFrame", UIParent, "BackdropTemplate")
@@ -327,14 +400,42 @@ local function BuildUI()
     frame.title:SetPoint("TOP", frame, "TOP", 0, -14)
     frame.title:SetText(CUOR.Settings.title)
 
-    frame.subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    frame.subtitle:SetPoint("TOP", frame.title, "BOTTOM", 0, -4)
-    frame.subtitle:SetText("Name            Qty      Unit Price      Line Total")
-
     frame.content = CreateFrame("Frame", nil, frame)
     frame.content:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -56)
     frame.content:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -56)
     frame.content:SetHeight(220)
+
+    local xName, xQty, xPrice, xTotal = GetColumnPositions()
+
+    frame.headerName = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.headerName:SetPoint("TOPLEFT", frame.content, "TOPLEFT", xName, 14)
+    frame.headerName:SetWidth(COLUMN_WIDTHS.name)
+    frame.headerName:SetJustifyH("LEFT")
+    frame.headerName:SetText("Name")
+
+    frame.headerQty = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.headerQty:SetPoint("TOPLEFT", frame.content, "TOPLEFT", xQty, 14)
+    frame.headerQty:SetWidth(COLUMN_WIDTHS.qty)
+    frame.headerQty:SetJustifyH("RIGHT")
+    frame.headerQty:SetText("Qty")
+
+    frame.headerPrice = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.headerPrice:SetPoint("TOPLEFT", frame.content, "TOPLEFT", xPrice, 14)
+    frame.headerPrice:SetWidth(COLUMN_WIDTHS.price)
+    frame.headerPrice:SetJustifyH("RIGHT")
+    frame.headerPrice:SetText("Unit Price")
+
+    frame.headerTotal = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    frame.headerTotal:SetPoint("TOPLEFT", frame.content, "TOPLEFT", xTotal, 14)
+    frame.headerTotal:SetWidth(COLUMN_WIDTHS.total)
+    frame.headerTotal:SetJustifyH("RIGHT")
+    frame.headerTotal:SetText("Line Total")
+
+    frame.headerSeparator = frame:CreateTexture(nil, "ARTWORK")
+    frame.headerSeparator:SetColorTexture(1, 1, 1, 0.2)
+    frame.headerSeparator:SetHeight(1)
+    frame.headerSeparator:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, 0)
+    frame.headerSeparator:SetPoint("TOPRIGHT", frame.content, "TOPRIGHT", 0, 0)
 
     frame.totalLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     frame.totalLabel:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 18, 24)
@@ -344,15 +445,15 @@ local function BuildUI()
     frame.totalValue:SetPoint("LEFT", frame.totalLabel, "RIGHT", 10, 0)
     frame.totalValue:SetText("0g 0s 0c")
 
-    frame.refreshButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    frame.refreshButton:SetSize(90, 22)
-    frame.refreshButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 18)
-    frame.refreshButton:SetText("Refresh")
-    frame.refreshButton:SetScript("OnClick", RefreshUI)
+    frame.resetButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.resetButton:SetSize(90, 22)
+    frame.resetButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 18)
+    frame.resetButton:SetText("Reset")
+    frame.resetButton:SetScript("OnClick", ResetTrackedData)
 
     frame.closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.closeButton:SetSize(60, 22)
-    frame.closeButton:SetPoint("RIGHT", frame.refreshButton, "LEFT", -8, 0)
+    frame.closeButton:SetPoint("RIGHT", frame.resetButton, "LEFT", -8, 0)
     frame.closeButton:SetText("Close")
     frame.closeButton:SetScript("OnClick", function()
         frame:Hide()
@@ -361,11 +462,32 @@ local function BuildUI()
     frame:Hide()
 end
 
-local eventFrame = CreateFrame("Frame")
+local function StartPolling()
+    if eventFrame and eventFrame.pollingActive then
+        return
+    end
+
+    eventFrame.pollingActive = true
+    eventFrame.pollElapsed = 0
+
+    eventFrame:SetScript("OnUpdate", function(_, elapsed)
+        eventFrame.pollElapsed = eventFrame.pollElapsed + elapsed
+        if eventFrame.pollElapsed < POLL_INTERVAL_SECONDS then
+            return
+        end
+
+        eventFrame.pollElapsed = 0
+        UpdateUsageFromBagDelta()
+    end)
+end
+
+eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+eventFrame:RegisterEvent("BAG_UPDATE")
 eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 
 eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
     if event == "ADDON_LOADED" and loadedAddonName == ADDON_NAME then
@@ -381,9 +503,13 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
         end
 
         CUOR.Settings = CUOR_DB.settings
+        if not CUOR.Settings.frameWidth or CUOR.Settings.frameWidth < MIN_FRAME_WIDTH then
+            CUOR.Settings.frameWidth = MIN_FRAME_WIDTH
+        end
         RebuildConsumableIndexes()
         BuildUI()
         HandleRaidStateTransition()
+        StartPolling()
     end
 
     if event == "PLAYER_ENTERING_WORLD" and frame then
@@ -395,8 +521,15 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
         HandleRaidStateTransition()
     end
 
-    if event == "BAG_UPDATE_DELAYED" then
+    if event == "BAG_UPDATE_DELAYED" or event == "BAG_UPDATE" then
         UpdateUsageFromBagDelta()
+    end
+
+    if event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local unitToken = loadedAddonName
+        if unitToken == "player" then
+            UpdateUsageFromBagDelta()
+        end
     end
 end)
 

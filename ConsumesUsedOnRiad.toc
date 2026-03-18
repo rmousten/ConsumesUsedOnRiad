@@ -1,6 +1,6 @@
 ## Interface: 110205
 ## Title: ConsumesUsedOnRiad
-## Author: rmous
+## Author: Hypricon
 ## Notes: Tracks consumable costs using Auctionator prices.
 ## Version: 0.1.0
 ## SavedVariables: CUOR_DB
