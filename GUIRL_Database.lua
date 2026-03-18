@@ -1,6 +1,7 @@
-CUOR = CUOR or {}
+GUIRL = GUIRL or {}
+CUOR = GUIRL
 
-CUOR.Consumables = {
+GUIRL.Consumables = {
     {
         label = "Blinding Light",
         itemID = 22861,
@@ -343,7 +344,7 @@ CUOR.Consumables = {
     },
 }
 
-CUOR.Settings = {
+GUIRL.Settings = {
     priceSource = "AUCTIONATOR",
     autoResetOnRaidEnter = true,
     framePoint = "CENTER",
@@ -351,5 +352,5 @@ CUOR.Settings = {
     frameY = 0,
     frameWidth = 340,
     rowHeight = 18,
-    title = "Consumes Used On Riad",
+    title = "Gold used In Riad Loser",
 }

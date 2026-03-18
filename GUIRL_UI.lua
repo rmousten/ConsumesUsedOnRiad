@@ -1,4 +1,5 @@
-CUOR = CUOR or {}
+GUIRL = GUIRL or CUOR or {}
+CUOR = GUIRL
 
 local ADDON_NAME = ...
 local frame
@@ -66,7 +67,7 @@ local function RebuildConsumableIndexes()
     activeConsumables = {}
     trackedItemIDs = {}
 
-    for _, consumable in ipairs(CUOR.Consumables or {}) do
+    for _, consumable in ipairs(GUIRL.Consumables or {}) do
         if consumable.itemID and consumable.enabled ~= false then
             activeConsumables[#activeConsumables + 1] = consumable
             trackedItemIDs[consumable.itemID] = true
@@ -170,22 +171,22 @@ local function GetTrackedBagCounts()
 end
 
 local function ResetUsageCounts()
-    CUOR_DB.usageCounts = {}
+    GUIRL_DB.usageCounts = {}
 end
 
 local function ResetTrackedData()
-    if not CUOR_DB then
+    if not GUIRL_DB then
         return
     end
 
     ResetUsageCounts()
     RebuildConsumableIndexes()
-    CUOR_DB.lastBagSnapshot = GetTrackedBagCounts()
+    GUIRL_DB.lastBagSnapshot = GetTrackedBagCounts()
     RefreshUI()
 end
 
 local function UpdateUsageFromBagDelta()
-    if not CUOR_DB or not CUOR_DB.usageCounts then
+    if not GUIRL_DB or not GUIRL_DB.usageCounts then
         return
     end
 
@@ -193,25 +194,25 @@ local function UpdateUsageFromBagDelta()
 
     local currentCounts = GetTrackedBagCounts()
 
-    if not CUOR_DB.lastBagSnapshot then
-        CUOR_DB.lastBagSnapshot = currentCounts
+    if not GUIRL_DB.lastBagSnapshot then
+        GUIRL_DB.lastBagSnapshot = currentCounts
         return
     end
 
     local changed = false
 
     for itemID in pairs(trackedItemIDs) do
-        local previousCount = CUOR_DB.lastBagSnapshot[itemID] or 0
+        local previousCount = GUIRL_DB.lastBagSnapshot[itemID] or 0
         local currentCount = currentCounts[itemID] or 0
 
         if currentCount < previousCount then
             local consumedAmount = previousCount - currentCount
-            CUOR_DB.usageCounts[itemID] = (CUOR_DB.usageCounts[itemID] or 0) + consumedAmount
+            GUIRL_DB.usageCounts[itemID] = (GUIRL_DB.usageCounts[itemID] or 0) + consumedAmount
             changed = true
         end
     end
 
-    CUOR_DB.lastBagSnapshot = currentCounts
+    GUIRL_DB.lastBagSnapshot = currentCounts
 
     if changed and frame and frame:IsShown() then
         RefreshUI()
@@ -219,7 +220,7 @@ local function UpdateUsageFromBagDelta()
 end
 
 local function HandleRaidStateTransition()
-    CUOR_DB.lastBagSnapshot = GetTrackedBagCounts()
+    GUIRL_DB.lastBagSnapshot = GetTrackedBagCounts()
 
     if frame and frame:IsShown() then
         RefreshUI()
@@ -280,7 +281,7 @@ local function EnsureRows(requiredRows)
 
     while #frame.rows < requiredRows do
         local row = CreateFrame("Frame", nil, frame.content)
-        row:SetSize(frame.content:GetWidth(), CUOR.Settings.rowHeight)
+        row:SetSize(frame.content:GetWidth(), GUIRL.Settings.rowHeight)
 
         row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         row.nameText:SetPoint("LEFT", row, "LEFT", xName, 0)
@@ -319,7 +320,7 @@ function RefreshUI()
 
     local displayConsumables = {}
     for _, consumable in ipairs(activeConsumables) do
-        local quantityUsed = CUOR_DB and CUOR_DB.usageCounts and CUOR_DB.usageCounts[consumable.itemID] or 0
+        local quantityUsed = GUIRL_DB and GUIRL_DB.usageCounts and GUIRL_DB.usageCounts[consumable.itemID] or 0
         if quantityUsed > 0 then
             displayConsumables[#displayConsumables + 1] = consumable
         end
@@ -333,7 +334,7 @@ function RefreshUI()
     for index, consumable in ipairs(displayConsumables) do
         local row = frame.rows[index]
         local itemName = GetItemDisplayName(consumable)
-        local quantityUsed = CUOR_DB and CUOR_DB.usageCounts and CUOR_DB.usageCounts[consumable.itemID] or 0
+        local quantityUsed = GUIRL_DB and GUIRL_DB.usageCounts and GUIRL_DB.usageCounts[consumable.itemID] or 0
         local price = 0
 
         if quantityUsed > 0 then
@@ -352,7 +353,7 @@ function RefreshUI()
         row.priceText:SetText(FormatMoney(price))
         row.totalText:SetText(FormatMoney(lineTotal))
 
-        yOffset = yOffset - CUOR.Settings.rowHeight
+        yOffset = yOffset - GUIRL.Settings.rowHeight
         row:Show()
     end
 
@@ -368,13 +369,13 @@ local function BuildUI()
         return
     end
 
-    if not CUOR.Settings.frameWidth or CUOR.Settings.frameWidth < MIN_FRAME_WIDTH then
-        CUOR.Settings.frameWidth = MIN_FRAME_WIDTH
+    if not GUIRL.Settings.frameWidth or GUIRL.Settings.frameWidth < MIN_FRAME_WIDTH then
+        GUIRL.Settings.frameWidth = MIN_FRAME_WIDTH
     end
 
-    frame = CreateFrame("Frame", "CUOR_MainFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(CUOR.Settings.frameWidth, 330)
-    frame:SetPoint(CUOR.Settings.framePoint, UIParent, CUOR.Settings.framePoint, CUOR.Settings.frameX, CUOR.Settings.frameY)
+    frame = CreateFrame("Frame", "GUIRL_MainFrame", UIParent, "BackdropTemplate")
+    frame:SetSize(GUIRL.Settings.frameWidth, 330)
+    frame:SetPoint(GUIRL.Settings.framePoint, UIParent, GUIRL.Settings.framePoint, GUIRL.Settings.frameX, GUIRL.Settings.frameY)
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
@@ -382,9 +383,9 @@ local function BuildUI()
     frame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
         local _, _, point, x, y = self:GetPoint(1)
-        CUOR.Settings.framePoint = point or "CENTER"
-        CUOR.Settings.frameX = x or 0
-        CUOR.Settings.frameY = y or 0
+        GUIRL.Settings.framePoint = point or "CENTER"
+        GUIRL.Settings.frameX = x or 0
+        GUIRL.Settings.frameY = y or 0
     end)
 
     frame:SetBackdrop({
@@ -398,7 +399,7 @@ local function BuildUI()
 
     frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     frame.title:SetPoint("TOP", frame, "TOP", 0, -14)
-    frame.title:SetText(CUOR.Settings.title)
+    frame.title:SetText(GUIRL.Settings.title)
 
     frame.content = CreateFrame("Frame", nil, frame)
     frame.content:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -56)
@@ -491,20 +492,21 @@ eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 
 eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
     if event == "ADDON_LOADED" and loadedAddonName == ADDON_NAME then
-        CUOR_DB = CUOR_DB or {}
-        CUOR_DB.settings = CUOR_DB.settings or {}
-        CUOR_DB.usageCounts = CUOR_DB.usageCounts or {}
-        CUOR_DB.lastBagSnapshot = CUOR_DB.lastBagSnapshot or nil
+        GUIRL_DB = GUIRL_DB or CUOR_DB or {}
+        CUOR_DB = GUIRL_DB
+        GUIRL_DB.settings = GUIRL_DB.settings or {}
+        GUIRL_DB.usageCounts = GUIRL_DB.usageCounts or {}
+        GUIRL_DB.lastBagSnapshot = GUIRL_DB.lastBagSnapshot or nil
 
-        for key, value in pairs(CUOR.Settings) do
-            if CUOR_DB.settings[key] == nil then
-                CUOR_DB.settings[key] = value
+        for key, value in pairs(GUIRL.Settings) do
+            if GUIRL_DB.settings[key] == nil then
+                GUIRL_DB.settings[key] = value
             end
         end
 
-        CUOR.Settings = CUOR_DB.settings
-        if not CUOR.Settings.frameWidth or CUOR.Settings.frameWidth < MIN_FRAME_WIDTH then
-            CUOR.Settings.frameWidth = MIN_FRAME_WIDTH
+        GUIRL.Settings = GUIRL_DB.settings
+        if not GUIRL.Settings.frameWidth or GUIRL.Settings.frameWidth < MIN_FRAME_WIDTH then
+            GUIRL.Settings.frameWidth = MIN_FRAME_WIDTH
         end
         RebuildConsumableIndexes()
         BuildUI()
@@ -533,8 +535,8 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
     end
 end)
 
-SLASH_CUOR1 = "/cuor"
-SlashCmdList.CUOR = function()
+SLASH_GUIRL1 = "/guirl"
+SlashCmdList.GUIRL = function()
     if not frame then
         BuildUI()
     end

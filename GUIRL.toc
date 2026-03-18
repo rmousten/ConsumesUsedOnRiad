@@ -1,9 +1,9 @@
 ## Interface: 110205
-## Title: ConsumesUsedOnRiad
+## Title: Gold used In Riad Loser
 ## Author: Hypricon
 ## Notes: Tracks consumable costs using Auctionator prices.
 ## Version: 0.1.0
-## SavedVariables: CUOR_DB
+## SavedVariables: GUIRL_DB, CUOR_DB
 
-CUOR_Database.lua
-CUOR_UI.lua
+GUIRL_Database.lua
+GUIRL_UI.lua
