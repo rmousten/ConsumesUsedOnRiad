@@ -342,10 +342,21 @@ GUIRL.Consumables = {
         itemID = 13459,
         enabled = true,
     },
+    {
+        label = "Super Sapper Charge",
+        itemID = 23827,
+        enabled = true,
+    },
+    {
+        label = "Goblin Sapper Charge",
+        itemID = 10646,
+        enabled = true,
+    },
 }
 
 GUIRL.Settings = {
     priceSource = "AUCTIONATOR",
+    pricePer1000Gold = 0,
     autoResetOnRaidEnter = true,
     minimapAngle = 225,
     framePoint = "CENTER",

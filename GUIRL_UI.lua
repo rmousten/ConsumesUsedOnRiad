@@ -134,6 +134,26 @@ local function FormatMoney(copper)
     return string.format("%dg %ds %dc", gold, silver, copperOnly)
 end
 
+local function GetPricePer1000Gold()
+    if not GUIRL or not GUIRL.Settings then
+        return 0
+    end
+
+    return tonumber(GUIRL.Settings.pricePer1000Gold) or 0
+end
+
+local function FormatRealCurrency(copper)
+    local pricePer1000 = GetPricePer1000Gold()
+    if pricePer1000 <= 0 then
+        return "n/a"
+    end
+
+    local numericCopper = tonumber(copper) or 0
+    local value = (numericCopper / 10000000) * pricePer1000
+
+    return string.format("%.2f", value)
+end
+
 local function TryAuctionatorPrice(itemID, itemLink)
     if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then
         return nil
@@ -460,6 +480,10 @@ local function RenderDisplayRows(displayRows, grandTotal)
     end
 
     frame.totalValue:SetText(FormatMoney(grandTotal))
+
+    if frame.totalRealValue then
+        frame.totalRealValue:SetText("EURO " .. FormatRealCurrency(grandTotal))
+    end
 end
 
 local function GetGraphEntryTotal(entry)
@@ -502,6 +526,14 @@ local function UpdateRaidSummaryCounters()
     local lastRaidTotal, lifetimeTotal = GetLogTotals()
     frame.lastRaidValue:SetText(FormatMoney(lastRaidTotal))
     frame.lifetimeValue:SetText(FormatMoney(lifetimeTotal))
+
+    if frame.lastRaidRealValue then
+        frame.lastRaidRealValue:SetText("EURO " .. FormatRealCurrency(lastRaidTotal))
+    end
+
+    if frame.lifetimeRealValue then
+        frame.lifetimeRealValue:SetText("EURO " .. FormatRealCurrency(lifetimeTotal))
+    end
 end
 
 local function CreateChartArea(parent, topAnchor, titleText)
@@ -574,6 +606,12 @@ local function HideUsageList()
     frame.headerSeparator:Hide()
     frame.totalLabel:Hide()
     frame.totalValue:Hide()
+    if frame.totalRealLabel then
+        frame.totalRealLabel:Hide()
+    end
+    if frame.totalRealValue then
+        frame.totalRealValue:Hide()
+    end
 
     if frame.rows then
         for _, row in ipairs(frame.rows) do
@@ -591,6 +629,12 @@ local function ShowUsageList()
     frame.headerSeparator:Show()
     frame.totalLabel:Show()
     frame.totalValue:Show()
+    if frame.totalRealLabel then
+        frame.totalRealLabel:Show()
+    end
+    if frame.totalRealValue then
+        frame.totalRealValue:Show()
+    end
 end
 
 local function ShowGraphPointTooltip(pointFrame)
@@ -607,6 +651,7 @@ local function ShowGraphPointTooltip(pointFrame)
 
     GameTooltip:SetText(seriesTitle .. " " .. tostring(pointFrame.logIndex or ""))
     GameTooltip:AddLine(valueLabel .. ": " .. FormatMoney(pointFrame.totalCopper or 0), 1, 1, 1)
+    GameTooltip:AddLine("Value (EURO): " .. FormatRealCurrency(pointFrame.totalCopper or 0), 0.9, 0.9, 0.9)
 
     if pointFrame.timestamp and pointFrame.timestamp > 0 then
         GameTooltip:AddLine(date("%Y-%m-%d %H:%M", pointFrame.timestamp), 0.8, 0.8, 0.8)
@@ -924,8 +969,59 @@ BuildUI = function()
     frame.topRightArt:SetAlpha(0.95)
 
     frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    frame.title:SetPoint("TOP", frame, "TOP", 0, -28)
+    frame.title:SetPoint("TOP", frame, "TOP", -40, -28)
     frame.title:SetText(GUIRL.Settings.title)
+
+    frame.priceInputLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.priceInputLabel:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -10)
+    frame.priceInputLabel:SetText("Price of 1000 gold")
+    frame.priceInputLabel:SetTextColor(1, 0.82, 0, 1)
+
+    frame.setPriceButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.setPriceButton:SetSize(72, 20)
+    frame.setPriceButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -30)
+    frame.setPriceButton:SetText("Set Price")
+
+    frame.priceInput = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    frame.priceInput:SetSize(90, 20)
+    frame.priceInput:SetPoint("RIGHT", frame.setPriceButton, "LEFT", -8, 0)
+    frame.priceInput:SetAutoFocus(false)
+    frame.priceInput:SetTextInsets(4, 4, 0, 0)
+
+    frame.priceInputLabel:ClearAllPoints()
+    frame.priceInputLabel:SetPoint("BOTTOMLEFT", frame.priceInput, "TOPLEFT", 0, 4)
+
+    local existingPrice = GetPricePer1000Gold()
+    if existingPrice > 0 then
+        frame.priceInput:SetText(string.format("%.2f", existingPrice))
+    else
+        frame.priceInput:SetText("")
+    end
+
+    frame.priceInput:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        frame.setPriceButton:Click()
+    end)
+
+    frame.priceInput:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+
+    frame.setPriceButton:SetScript("OnClick", function()
+        local rawText = frame.priceInput:GetText() or ""
+        rawText = string.gsub(rawText, ",", ".")
+        local parsedValue = tonumber(rawText)
+
+        if parsedValue and parsedValue > 0 then
+            GUIRL.Settings.pricePer1000Gold = parsedValue
+            frame.priceInput:SetText(string.format("%.2f", parsedValue))
+        else
+            GUIRL.Settings.pricePer1000Gold = 0
+            frame.priceInput:SetText("")
+        end
+
+        RefreshUI()
+    end)
 
     frame.content = CreateFrame("Frame", nil, frame)
     frame.content:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -70)
@@ -972,10 +1068,18 @@ BuildUI = function()
     frame.totalValue:SetPoint("LEFT", frame.totalLabel, "RIGHT", 10, 0)
     frame.totalValue:SetText("0g 0s 0c")
 
+    frame.totalRealLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.totalRealLabel:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 18, 8)
+    frame.totalRealLabel:SetText("Value (EURO):")
+
+    frame.totalRealValue = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.totalRealValue:SetPoint("LEFT", frame.totalRealLabel, "RIGHT", 8, 0)
+    frame.totalRealValue:SetText("n/a")
+
     frame.summaryBox = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     frame.summaryBox:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 10, -6)
     frame.summaryBox:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", -10, -6)
-    frame.summaryBox:SetHeight(42)
+    frame.summaryBox:SetHeight(58)
     frame.summaryBox:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -986,13 +1090,17 @@ BuildUI = function()
     frame.summaryBox:SetBackdropBorderColor(1, 1, 1, 0.12)
 
     frame.lastRaidLabel = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.lastRaidLabel:SetPoint("LEFT", frame.summaryBox, "LEFT", 10, 0)
+    frame.lastRaidLabel:SetPoint("TOPLEFT", frame.summaryBox, "TOPLEFT", 10, -8)
     frame.lastRaidLabel:SetText("Gold Used Last Raid:")
 
     frame.lastRaidValue = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     frame.lastRaidValue:SetPoint("LEFT", frame.lastRaidLabel, "RIGHT", 6, 0)
     frame.lastRaidValue:SetTextColor(1, 1, 1, 1)
     frame.lastRaidValue:SetText("0g 0s 0c")
+
+    frame.lastRaidRealValue = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.lastRaidRealValue:SetPoint("TOPLEFT", frame.lastRaidValue, "BOTTOMLEFT", 0, -2)
+    frame.lastRaidRealValue:SetText("EURO n/a")
 
     frame.lifetimeLabel = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     frame.lifetimeLabel:SetPoint("LEFT", frame.lastRaidValue, "RIGHT", 20, 0)
@@ -1002,6 +1110,10 @@ BuildUI = function()
     frame.lifetimeValue:SetPoint("LEFT", frame.lifetimeLabel, "RIGHT", 6, 0)
     frame.lifetimeValue:SetTextColor(1, 1, 1, 1)
     frame.lifetimeValue:SetText("0g 0s 0c")
+
+    frame.lifetimeRealValue = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.lifetimeRealValue:SetPoint("TOPLEFT", frame.lifetimeValue, "BOTTOMLEFT", 0, -2)
+    frame.lifetimeRealValue:SetText("EURO n/a")
 
     frame.resetButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.resetButton:SetSize(110, 22)

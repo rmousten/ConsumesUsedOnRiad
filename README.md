@@ -42,6 +42,12 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 - In-game texture path used by the addon is built from the live addon folder name: `Interface\\AddOns\\<AddonFolder>\\Media\\Haste_AI.png`.
 - If your client does not render `.png`, convert the same image to `.tga` and I can switch the loader to that file name.
 
+## Real value conversion
+
+- At the top-right of the UI, set `Price of 1000 gold` and click `Set Price`.
+- The addon converts tracked gold totals into real value (`$/EUR`) using that rate.
+- Converted values are shown in list totals, graph tooltips, and last raid/lifetime summary.
+
 
 ## Live tracking behavior
 
