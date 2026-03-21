@@ -16,7 +16,7 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 2. Install and enable Auctionator.
 3. Launch the game and type `/guirl` to show/hide the window.
 4. Drag the window with left click to move it.
-5. Click `Reset/Refresh` to open a `Yes/No` prompt for logging before reset.
+5. Click `Reset/Log" `Yes/No` prompt for logging before reset.
 
 ## Refresh logging
 

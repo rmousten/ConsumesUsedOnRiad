@@ -974,7 +974,7 @@ BuildUI = function()
 
     frame.priceInputLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     frame.priceInputLabel:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -10)
-    frame.priceInputLabel:SetText("Price of 1000 gold")
+    frame.priceInputLabel:SetText("Price of 1000 Gold")
     frame.priceInputLabel:SetTextColor(1, 0.82, 0, 1)
 
     frame.setPriceButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -1118,7 +1118,7 @@ BuildUI = function()
     frame.resetButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.resetButton:SetSize(110, 22)
     frame.resetButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 18)
-    frame.resetButton:SetText("Reset")
+    frame.resetButton:SetText("Reset/Log")
     frame.resetButton:SetScript("OnClick", ShowResetPopup)
 
     frame.graphButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
