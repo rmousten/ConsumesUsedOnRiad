@@ -53,8 +53,6 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 
 - The addon tracks consumed quantity by watching bag count decreases for enabled consumables.
 - Tracking is active everywhere by default.
-- On entering a raid instance, usage counters reset automatically by default.
-- You can change this in `GUIRL.Settings.autoResetOnRaidEnter`.
 
 ## Price source
 - Primary source: Auctionator API.

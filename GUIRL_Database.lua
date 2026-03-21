@@ -357,7 +357,6 @@ GUIRL.Consumables = {
 GUIRL.Settings = {
     priceSource = "AUCTIONATOR",
     pricePer1000Gold = 0,
-    autoResetOnRaidEnter = true,
     minimapAngle = 225,
     framePoint = "CENTER",
     frameX = 0,

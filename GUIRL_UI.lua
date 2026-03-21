@@ -1208,9 +1208,7 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
         RefreshUI()
     end
 
-    if event == "ZONE_CHANGED_NEW_AREA" and frame then
-        HandleRaidStateTransition()
-    end
+
 
     if event == "BAG_UPDATE_DELAYED" or event == "BAG_UPDATE" then
         UpdateUsageFromBagDelta()
