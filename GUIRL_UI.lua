@@ -311,57 +311,97 @@ local function EnsureRows(requiredRows)
     end
 end
 
-function RefreshUI()
-    if not frame then
-        return
-    end
-
+local function BuildDisplayRowsAndTotal()
     RebuildConsumableIndexes()
 
-    local displayConsumables = {}
+    local displayRows = {}
+    local grandTotal = 0
+
     for _, consumable in ipairs(activeConsumables) do
         local quantityUsed = GUIRL_DB and GUIRL_DB.usageCounts and GUIRL_DB.usageCounts[consumable.itemID] or 0
+
         if quantityUsed > 0 then
-            displayConsumables[#displayConsumables + 1] = consumable
+            local price = select(1, GetItemPrice(consumable.itemID)) or 0
+            local lineTotal = price * quantityUsed
+
+            displayRows[#displayRows + 1] = {
+                itemID = consumable.itemID,
+                itemName = GetItemDisplayName(consumable),
+                quantityUsed = quantityUsed,
+                price = price,
+                lineTotal = lineTotal,
+            }
+
+            grandTotal = grandTotal + lineTotal
         end
     end
 
-    EnsureRows(#displayConsumables)
+    return displayRows, grandTotal
+end
+
+local function RenderDisplayRows(displayRows, grandTotal)
+    EnsureRows(#displayRows)
 
     local yOffset = -2
-    local grandTotal = 0
 
-    for index, consumable in ipairs(displayConsumables) do
+    for index, rowData in ipairs(displayRows) do
         local row = frame.rows[index]
-        local itemName = GetItemDisplayName(consumable)
-        local quantityUsed = GUIRL_DB and GUIRL_DB.usageCounts and GUIRL_DB.usageCounts[consumable.itemID] or 0
-        local price = 0
-
-        if quantityUsed > 0 then
-            price = select(1, GetItemPrice(consumable.itemID)) or 0
-        end
-
-        local lineTotal = price * quantityUsed
-        grandTotal = grandTotal + lineTotal
 
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", frame.content, "TOPLEFT", 0, yOffset)
         row:SetPoint("TOPRIGHT", frame.content, "TOPRIGHT", 0, yOffset)
 
-        row.nameText:SetText(itemName)
-        row.qtyText:SetText(tostring(quantityUsed))
-        row.priceText:SetText(FormatMoney(price))
-        row.totalText:SetText(FormatMoney(lineTotal))
+        row.nameText:SetText(rowData.itemName)
+        row.qtyText:SetText(tostring(rowData.quantityUsed))
+        row.priceText:SetText(FormatMoney(rowData.price))
+        row.totalText:SetText(FormatMoney(rowData.lineTotal))
 
         yOffset = yOffset - GUIRL.Settings.rowHeight
         row:Show()
     end
 
-    for index = #displayConsumables + 1, #frame.rows do
+    for index = #displayRows + 1, #frame.rows do
         frame.rows[index]:Hide()
     end
 
     frame.totalValue:SetText(FormatMoney(grandTotal))
+end
+
+function RefreshUI(shouldLog)
+    if not frame then
+        return
+    end
+
+    local displayRows, grandTotal = BuildDisplayRowsAndTotal()
+
+    if shouldLog and GUIRL.Log and GUIRL.Log.SaveSnapshot then
+        GUIRL.Log.SaveSnapshot(displayRows, grandTotal)
+    end
+
+    RenderDisplayRows(displayRows, grandTotal)
+end
+
+local function ShowResetPopup()
+    if not StaticPopupDialogs["GUIRL_RESET_LOG_PROMPT"] then
+        StaticPopupDialogs["GUIRL_RESET_LOG_PROMPT"] = {
+            text = "Do you want to log before reset?",
+            button1 = YES,
+            button2 = NO,
+            OnAccept = function()
+                RefreshUI(true)
+                ResetTrackedData()
+            end,
+            OnCancel = function()
+                ResetTrackedData()
+            end,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+            preferredIndex = 3,
+        }
+    end
+
+    StaticPopup_Show("GUIRL_RESET_LOG_PROMPT")
 end
 
 local function BuildUI()
@@ -447,10 +487,10 @@ local function BuildUI()
     frame.totalValue:SetText("0g 0s 0c")
 
     frame.resetButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    frame.resetButton:SetSize(90, 22)
+    frame.resetButton:SetSize(110, 22)
     frame.resetButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 18)
     frame.resetButton:SetText("Reset")
-    frame.resetButton:SetScript("OnClick", ResetTrackedData)
+    frame.resetButton:SetScript("OnClick", ShowResetPopup)
 
     frame.closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.closeButton:SetSize(60, 22)
@@ -497,6 +537,9 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
         GUIRL_DB.settings = GUIRL_DB.settings or {}
         GUIRL_DB.usageCounts = GUIRL_DB.usageCounts or {}
         GUIRL_DB.lastBagSnapshot = GUIRL_DB.lastBagSnapshot or nil
+        if GUIRL.Log and GUIRL.Log.Initialize then
+            GUIRL.Log.Initialize(GUIRL_DB)
+        end
 
         for key, value in pairs(GUIRL.Settings) do
             if GUIRL_DB.settings[key] == nil then

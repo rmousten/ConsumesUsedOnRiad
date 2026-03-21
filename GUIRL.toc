@@ -6,4 +6,5 @@
 ## SavedVariables: GUIRL_DB, CUOR_DB
 
 GUIRL_Database.lua
+Log\GUIRL_Log.lua
 GUIRL_UI.lua

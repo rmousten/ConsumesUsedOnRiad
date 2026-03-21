@@ -6,6 +6,7 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 
 - `GUIRL.toc` loads the addon metadata.
 - `GUIRL_Database.lua` contains your consumables list and settings template.
+- `Log/GUIRL_Log.lua` contains log snapshot storage helpers.
 - `GUIRL_UI.lua` contains the movable UI, slash command, and total cost logic.
 
 ## How to use
@@ -14,7 +15,15 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 2. Install and enable Auctionator.
 3. Launch the game and type `/guirl` to show/hide the window.
 4. Drag the window with left click to move it.
-5. Click `Reset` to clear tracked items and totals.
+5. Click `Reset/Refresh` to open a `Yes/No` prompt for logging before reset.
+
+## Refresh logging
+
+- On `Reset/Refresh`, a popup asks if you want to log the current addon data before reset.
+- Press `Yes` to save the currently displayed rows and total cost, then reset tracked usage.
+- Press `No` to reset tracked usage without saving a log entry.
+- Log entries are stored in `GUIRL_DB.log.entries` and are ready for future statistics/graph features.
+- Logged prices are static snapshots (`snapshotUnitPriceCopper`, `snapshotLineTotalCopper`, `snapshotTotalCopper`) so historical data does not change when market prices change later.
 
 
 ## Live tracking behavior
