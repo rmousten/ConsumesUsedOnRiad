@@ -628,7 +628,46 @@ local function ShowGraphPointTooltip(pointFrame)
     pointFrame.lastShiftState = isShiftDown
 end
 
-local function RenderChartSeries(area, entries, values, colorR, colorG, colorB, seriesTitle, valueLabel, includeRows)
+local function BuildCumulativeRowsByPoint(entries)
+    local cumulativeRowsByPoint = {}
+    local quantityByKey = {}
+    local nameByKey = {}
+    local keyOrder = {}
+
+    for index, entry in ipairs(entries) do
+        for _, row in ipairs(entry.rows or {}) do
+            local itemName = row.itemName or "Unknown"
+            local itemID = tonumber(row.itemID)
+            local key = itemID or ("name:" .. itemName)
+
+            if not quantityByKey[key] then
+                quantityByKey[key] = 0
+                nameByKey[key] = itemName
+                keyOrder[#keyOrder + 1] = key
+            end
+
+            quantityByKey[key] = quantityByKey[key] + (tonumber(row.quantityUsed) or 0)
+        end
+
+        local pointRows = {}
+        for _, key in ipairs(keyOrder) do
+            local quantity = quantityByKey[key] or 0
+            if quantity > 0 then
+                pointRows[#pointRows + 1] = {
+                    itemID = type(key) == "number" and key or nil,
+                    itemName = nameByKey[key] or "Unknown",
+                    quantityUsed = quantity,
+                }
+            end
+        end
+
+        cumulativeRowsByPoint[index] = pointRows
+    end
+
+    return cumulativeRowsByPoint
+end
+
+local function RenderChartSeries(area, entries, values, colorR, colorG, colorB, seriesTitle, valueLabel, includeRows, rowsByPoint)
     for _, lineTexture in ipairs(area.lines) do
         lineTexture:Hide()
     end
@@ -723,7 +762,11 @@ local function RenderChartSeries(area, entries, values, colorR, colorG, colorB, 
         pointFrame.dot:SetVertexColor(colorR, colorG, colorB, 1)
         pointFrame.totalCopper = value
         pointFrame.timestamp = entries[index] and entries[index].timestamp or 0
-        pointFrame.rows = includeRows and entries[index] and entries[index].rows or nil
+        if rowsByPoint and rowsByPoint[index] then
+            pointFrame.rows = rowsByPoint[index]
+        else
+            pointFrame.rows = includeRows and entries[index] and entries[index].rows or nil
+        end
         pointFrame.logIndex = index
         pointFrame.seriesTitle = seriesTitle
         pointFrame.valueLabel = valueLabel
@@ -748,6 +791,7 @@ RenderGraph = function()
 
     local perRaidValues = {}
     local cumulativeValues = {}
+    local cumulativeRowsByPoint = BuildCumulativeRowsByPoint(entries)
     local runningTotal = 0
 
     for _, entry in ipairs(entries) do
@@ -770,7 +814,7 @@ RenderGraph = function()
     panel.emptyText:Hide()
 
     RenderChartSeries(panel.perRaidArea, entries, perRaidValues, 1, 0.85, 0.2, "Raid", "Total Gold Spent", true)
-    RenderChartSeries(panel.cumulativeArea, entries, cumulativeValues, 0.3, 0.9, 1, "Lifetime", "Cumulative Gold Spent", false)
+    RenderChartSeries(panel.cumulativeArea, entries, cumulativeValues, 0.3, 0.9, 1, "Lifetime", "Cumulative Gold Spent", false, cumulativeRowsByPoint)
 end
 
 local function ToggleGraphView()
