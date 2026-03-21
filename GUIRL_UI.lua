@@ -10,6 +10,13 @@ local trackedItemIDs = {}
 local POLL_INTERVAL_SECONDS = 0.5
 local MIN_FRAME_WIDTH = 520
 local COLUMN_GAP = 6
+local TOP_RIGHT_ART_FILENAME = "Haste_AI.png"
+local LEGACY_TITLE = "Gold used In Riad Loser"
+
+local function GetTopRightArtPath()
+    local addonFolder = ADDON_NAME or "GUIRL"
+    return "Interface\\AddOns\\" .. addonFolder .. "\\Media\\" .. TOP_RIGHT_ART_FILENAME
+end
 
 local COLUMN_WIDTHS = {
     name = 186,
@@ -437,13 +444,22 @@ local function BuildUI()
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
 
+    frame.topRightArt = frame:CreateTexture(nil, "ARTWORK")
+    frame.topRightArt:SetSize(46, 46)
+    frame.topRightArt:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -8)
+
+    frame.topRightArt:SetTexture(GetTopRightArtPath())
+
+    frame.topRightArt:SetBlendMode("BLEND")
+    frame.topRightArt:SetAlpha(0.95)
+
     frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    frame.title:SetPoint("TOP", frame, "TOP", 0, -14)
+    frame.title:SetPoint("TOP", frame, "TOP", 0, -28)
     frame.title:SetText(GUIRL.Settings.title)
 
     frame.content = CreateFrame("Frame", nil, frame)
-    frame.content:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -56)
-    frame.content:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -56)
+    frame.content:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -70)
+    frame.content:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -70)
     frame.content:SetHeight(220)
 
     local xName, xQty, xPrice, xTotal = GetColumnPositions()
@@ -545,6 +561,11 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
             if GUIRL_DB.settings[key] == nil then
                 GUIRL_DB.settings[key] = value
             end
+        end
+
+        -- Migrate legacy typo from older saved settings.
+        if GUIRL_DB.settings.title == LEGACY_TITLE then
+            GUIRL_DB.settings.title = GUIRL.Settings.title
         end
 
         GUIRL.Settings = GUIRL_DB.settings

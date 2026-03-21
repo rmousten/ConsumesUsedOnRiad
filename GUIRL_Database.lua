@@ -352,5 +352,5 @@ GUIRL.Settings = {
     frameY = 0,
     frameWidth = 340,
     rowHeight = 18,
-    title = "Gold used In Riad Loser",
+    title = "Gold Used In Raid Loser",
 }

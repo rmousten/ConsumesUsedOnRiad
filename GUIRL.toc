@@ -1,5 +1,5 @@
 ## Interface: 120001, 120000, 50503, 38000, 20505, 11508
-## Title: Gold used In Riad Loser
+## Title: Gold used In Raid Loser
 ## Author: Hypricon
 ## Notes: Tracks consumable costs using Auctionator prices.
 ## Version: 1.0.0

@@ -7,6 +7,7 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 - `GUIRL.toc` loads the addon metadata.
 - `GUIRL_Database.lua` contains your consumables list and settings template.
 - `Log/GUIRL_Log.lua` contains log snapshot storage helpers.
+- `Media/` holds optional custom UI images.
 - `GUIRL_UI.lua` contains the movable UI, slash command, and total cost logic.
 
 ## How to use
@@ -24,6 +25,13 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 - Press `No` to reset tracked usage without saving a log entry.
 - Log entries are stored in `GUIRL_DB.log.entries` and are ready for future statistics/graph features.
 - Logged prices are static snapshots (`snapshotUnitPriceCopper`, `snapshotLineTotalCopper`, `snapshotTotalCopper`) so historical data does not change when market prices change later.
+
+## Top-right window image
+
+- The `/guirl` frame supports a custom image in the top-right corner.
+- Current default filename is `Media/Haste_AI.png`.
+- In-game texture path used by the addon is built from the live addon folder name: `Interface\\AddOns\\<AddonFolder>\\Media\\Haste_AI.png`.
+- If your client does not render `.png`, convert the same image to `.tga` and I can switch the loader to that file name.
 
 
 ## Live tracking behavior
