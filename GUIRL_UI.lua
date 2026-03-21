@@ -5,18 +5,105 @@ local ADDON_NAME = ...
 local frame
 local RefreshUI
 local RenderGraph
+local BuildUI
+local minimapButton
 local eventFrame
 local activeConsumables = {}
 local trackedItemIDs = {}
 local POLL_INTERVAL_SECONDS = 0.5
 local MIN_FRAME_WIDTH = 520
 local COLUMN_GAP = 6
-local TOP_RIGHT_ART_FILENAME = "Haste_AI.png"
+local ADDON_ICON_FILENAME = "Haste_AI.png"
 local LEGACY_TITLE = "Gold used In Riad Loser"
 
-local function GetTopRightArtPath()
+local function GetAddonIconPath()
     local addonFolder = ADDON_NAME or "GUIRL"
-    return "Interface\\AddOns\\" .. addonFolder .. "\\Media\\" .. TOP_RIGHT_ART_FILENAME
+    return "Interface\\AddOns\\" .. addonFolder .. "\\Media\\" .. ADDON_ICON_FILENAME
+end
+
+local function ToggleMainFrame()
+    if not frame then
+        BuildUI()
+    end
+
+    if frame:IsShown() then
+        frame:Hide()
+    else
+        RefreshUI()
+        frame:Show()
+    end
+end
+
+local function PositionMinimapButton()
+    if not minimapButton or not GUIRL or not GUIRL.Settings then
+        return
+    end
+
+    local angle = tonumber(GUIRL.Settings.minimapAngle) or 225
+    local radians = math.rad(angle)
+    local x = math.cos(radians) * 80
+    local y = math.sin(radians) * 80
+
+    minimapButton:ClearAllPoints()
+    minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
+end
+
+local function CreateMinimapButton()
+    if minimapButton then
+        return
+    end
+
+    minimapButton = CreateFrame("Button", "GUIRL_MinimapButton", Minimap)
+    minimapButton:SetSize(32, 32)
+    minimapButton:SetFrameStrata("MEDIUM")
+    minimapButton:SetFrameLevel(8)
+    minimapButton:RegisterForClicks("LeftButtonUp")
+    minimapButton:RegisterForDrag("LeftButton")
+
+    minimapButton.icon = minimapButton:CreateTexture(nil, "BACKGROUND")
+    minimapButton.icon:SetSize(20, 20)
+    minimapButton.icon:SetPoint("CENTER")
+    minimapButton.icon:SetTexture(GetAddonIconPath())
+
+    minimapButton.border = minimapButton:CreateTexture(nil, "OVERLAY")
+    minimapButton.border:SetSize(54, 54)
+    minimapButton.border:SetPoint("TOPLEFT")
+    minimapButton.border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+
+    minimapButton:SetScript("OnClick", function()
+        ToggleMainFrame()
+    end)
+
+    minimapButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("/guirl for UI")
+        GameTooltip:AddLine("Made by Hypri", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+
+    minimapButton:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    minimapButton:SetScript("OnDragStart", function(self)
+        self:SetScript("OnUpdate", function(button)
+            local mx, my = Minimap:GetCenter()
+            local cx, cy = GetCursorPosition()
+            local scale = UIParent:GetEffectiveScale()
+            cx = cx / scale
+            cy = cy / scale
+
+            local angle = math.deg(math.atan2(cy - my, cx - mx))
+            GUIRL.Settings.minimapAngle = angle
+            PositionMinimapButton()
+        end)
+    end)
+
+    minimapButton:SetScript("OnDragStop", function(self)
+        self:SetScript("OnUpdate", nil)
+    end)
+
+    PositionMinimapButton()
 end
 
 local COLUMN_WIDTHS = {
@@ -750,7 +837,7 @@ local function ShowResetPopup()
     StaticPopup_Show("GUIRL_RESET_LOG_PROMPT")
 end
 
-local function BuildUI()
+BuildUI = function()
     if frame then
         return
     end
@@ -787,7 +874,7 @@ local function BuildUI()
     frame.topRightArt:SetSize(46, 46)
     frame.topRightArt:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -8)
 
-    frame.topRightArt:SetTexture(GetTopRightArtPath())
+    frame.topRightArt:SetTexture(GetAddonIconPath())
 
     frame.topRightArt:SetBlendMode("BLEND")
     frame.topRightArt:SetAlpha(0.95)
@@ -950,8 +1037,12 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
         if not GUIRL.Settings.frameWidth or GUIRL.Settings.frameWidth < MIN_FRAME_WIDTH then
             GUIRL.Settings.frameWidth = MIN_FRAME_WIDTH
         end
+        if GUIRL.Settings.minimapAngle == nil then
+            GUIRL.Settings.minimapAngle = 225
+        end
         RebuildConsumableIndexes()
         BuildUI()
+        CreateMinimapButton()
         HandleRaidStateTransition()
         StartPolling()
     end
@@ -979,14 +1070,5 @@ end)
 
 SLASH_GUIRL1 = "/guirl"
 SlashCmdList.GUIRL = function()
-    if not frame then
-        BuildUI()
-    end
-
-    if frame:IsShown() then
-        frame:Hide()
-    else
-        RefreshUI()
-        frame:Show()
-    end
+    ToggleMainFrame()
 end
