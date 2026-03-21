@@ -26,6 +26,15 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 - Log entries are stored in `GUIRL_DB.log.entries` and are ready for future statistics/graph features.
 - Logged prices are static snapshots (`snapshotUnitPriceCopper`, `snapshotLineTotalCopper`, `snapshotTotalCopper`) so historical data does not change when market prices change later.
 
+## Graph view
+
+- Click `Graph` in the main window to switch to total gold spent history.
+- The top graph is `Total Gold Spend Per Raid` and plots one point per saved log entry.
+- The second graph shows cumulative gold spend over time so you can see total growth.
+- Hover a point to see that entry's total gold spent.
+- The graph uses only snapshot total values from the log (not live market prices).
+- Bottom counters show `Gold Used Last Raid` and `Gold Used Lifetime`.
+
 ## Top-right window image
 
 - The `/guirl` frame supports a custom image in the top-right corner.

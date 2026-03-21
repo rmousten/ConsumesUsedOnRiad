@@ -4,6 +4,7 @@ CUOR = GUIRL
 local ADDON_NAME = ...
 local frame
 local RefreshUI
+local RenderGraph
 local eventFrame
 local activeConsumables = {}
 local trackedItemIDs = {}
@@ -374,6 +375,339 @@ local function RenderDisplayRows(displayRows, grandTotal)
     frame.totalValue:SetText(FormatMoney(grandTotal))
 end
 
+local function GetGraphEntryTotal(entry)
+    if not entry then
+        return 0
+    end
+
+    return tonumber(entry.snapshotTotalCopper) or tonumber(entry.totalCopper) or 0
+end
+
+local function GetAngleRadians(deltaY, deltaX)
+    if math.atan2 then
+        return math.atan2(deltaY, deltaX)
+    end
+
+    return math.atan(deltaY, deltaX)
+end
+
+local function GetLogTotals()
+    local entries = GUIRL_DB and GUIRL_DB.log and GUIRL_DB.log.entries or {}
+    local lifetimeTotal = 0
+
+    for _, entry in ipairs(entries) do
+        lifetimeTotal = lifetimeTotal + GetGraphEntryTotal(entry)
+    end
+
+    local lastRaidTotal = 0
+    if #entries > 0 then
+        lastRaidTotal = GetGraphEntryTotal(entries[#entries])
+    end
+
+    return lastRaidTotal, lifetimeTotal
+end
+
+local function UpdateRaidSummaryCounters()
+    if not frame or not frame.lastRaidValue or not frame.lifetimeValue then
+        return
+    end
+
+    local lastRaidTotal, lifetimeTotal = GetLogTotals()
+    frame.lastRaidValue:SetText(FormatMoney(lastRaidTotal))
+    frame.lifetimeValue:SetText(FormatMoney(lifetimeTotal))
+end
+
+local function CreateChartArea(parent, topAnchor, titleText)
+    local area = CreateFrame("Frame", nil, parent)
+    area:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, topAnchor)
+    area:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, topAnchor)
+    area:SetHeight(84)
+
+    area.titleText = area:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    area.titleText:SetPoint("TOPLEFT", area, "TOPLEFT", 0, 0)
+    area.titleText:SetText(titleText)
+
+    area.yAxis = area:CreateTexture(nil, "BORDER")
+    area.yAxis:SetColorTexture(1, 1, 1, 0.2)
+    area.yAxis:SetWidth(1)
+    area.yAxis:SetPoint("BOTTOMLEFT", area, "BOTTOMLEFT", 20, 14)
+    area.yAxis:SetPoint("TOPLEFT", area, "TOPLEFT", 20, -14)
+
+    area.xAxis = area:CreateTexture(nil, "BORDER")
+    area.xAxis:SetColorTexture(1, 1, 1, 0.2)
+    area.xAxis:SetHeight(1)
+    area.xAxis:SetPoint("BOTTOMLEFT", area, "BOTTOMLEFT", 20, 14)
+    area.xAxis:SetPoint("BOTTOMRIGHT", area, "BOTTOMRIGHT", -8, 14)
+
+    area.lines = {}
+    area.points = {}
+
+    return area
+end
+
+local function EnsureGraphWidgets()
+    if frame.graphPanel then
+        return
+    end
+
+    frame.graphPanel = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    frame.graphPanel:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -70)
+    frame.graphPanel:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -70)
+    frame.graphPanel:SetHeight(220)
+    frame.graphPanel:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        tile = false,
+        edgeSize = 1,
+    })
+    frame.graphPanel:SetBackdropColor(0.02, 0.02, 0.02, 0.45)
+    frame.graphPanel:SetBackdropBorderColor(1, 1, 1, 0.12)
+
+    frame.graphPanel.emptyText = frame.graphPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.graphPanel.emptyText:SetPoint("CENTER", frame.graphPanel, "CENTER", 0, 0)
+    frame.graphPanel.emptyText:SetText("No log entries yet.\nUse Reset with logging to add points.")
+
+    frame.graphPanel.perRaidArea = CreateChartArea(frame.graphPanel, -10, "Total Gold Spend Per Raid")
+    frame.graphPanel.cumulativeArea = CreateChartArea(frame.graphPanel, -112, "Gold Spend Built Up Over Time")
+    frame.graphPanel:Hide()
+
+    frame.graphPanel:SetScript("OnSizeChanged", function()
+        if frame and frame.showingGraph then
+            RenderGraph()
+        end
+    end)
+end
+
+local function HideUsageList()
+    frame.content:Hide()
+    frame.headerName:Hide()
+    frame.headerQty:Hide()
+    frame.headerPrice:Hide()
+    frame.headerTotal:Hide()
+    frame.headerSeparator:Hide()
+    frame.totalLabel:Hide()
+    frame.totalValue:Hide()
+
+    if frame.rows then
+        for _, row in ipairs(frame.rows) do
+            row:Hide()
+        end
+    end
+end
+
+local function ShowUsageList()
+    frame.content:Show()
+    frame.headerName:Show()
+    frame.headerQty:Show()
+    frame.headerPrice:Show()
+    frame.headerTotal:Show()
+    frame.headerSeparator:Show()
+    frame.totalLabel:Show()
+    frame.totalValue:Show()
+end
+
+local function ShowGraphPointTooltip(pointFrame)
+    if not pointFrame then
+        return
+    end
+
+    local isShiftDown = IsShiftKeyDown and IsShiftKeyDown()
+    local rows = pointFrame.rows or {}
+
+    GameTooltip:SetOwner(pointFrame, "ANCHOR_RIGHT")
+    local seriesTitle = pointFrame.seriesTitle or "Log Point"
+    local valueLabel = pointFrame.valueLabel or "Total Spent"
+
+    GameTooltip:SetText(seriesTitle .. " " .. tostring(pointFrame.logIndex or ""))
+    GameTooltip:AddLine(valueLabel .. ": " .. FormatMoney(pointFrame.totalCopper or 0), 1, 1, 1)
+
+    if pointFrame.timestamp and pointFrame.timestamp > 0 then
+        GameTooltip:AddLine(date("%Y-%m-%d %H:%M", pointFrame.timestamp), 0.8, 0.8, 0.8)
+    end
+
+    if pointFrame.rows and #rows > 0 and not isShiftDown then
+        GameTooltip:AddLine("Hold Shift for more info", 0.75, 0.75, 0.75)
+    elseif pointFrame.rows and #rows > 0 then
+        GameTooltip:AddLine("Items Logged:", 1, 0.9, 0.4)
+
+        for _, row in ipairs(rows) do
+            local quantity = tonumber(row.quantityUsed) or 0
+            local itemName = row.itemName or (row.itemID and ("Item " .. tostring(row.itemID))) or "Unknown"
+            GameTooltip:AddLine(string.format("%dx %s", quantity, itemName), 0.95, 0.95, 0.95)
+        end
+    end
+
+    GameTooltip:Show()
+    pointFrame.lastShiftState = isShiftDown
+end
+
+local function RenderChartSeries(area, entries, values, colorR, colorG, colorB, seriesTitle, valueLabel, includeRows)
+    for _, lineTexture in ipairs(area.lines) do
+        lineTexture:Hide()
+    end
+
+    for _, pointFrame in ipairs(area.points) do
+        pointFrame:Hide()
+    end
+
+    if #values == 0 then
+        return
+    end
+
+    local leftPadding = 20
+    local rightPadding = 8
+    local topPadding = 18
+    local bottomPadding = 14
+    local graphWidth = math.max(area:GetWidth() - leftPadding - rightPadding, 1)
+    local graphHeight = math.max(area:GetHeight() - topPadding - bottomPadding, 1)
+    local minValue = nil
+    local maxValue = nil
+
+    for _, value in ipairs(values) do
+        if not minValue or value < minValue then
+            minValue = value
+        end
+
+        if not maxValue or value > maxValue then
+            maxValue = value
+        end
+    end
+
+    local valueSpan = (maxValue or 0) - (minValue or 0)
+    local xStep = #values > 1 and (graphWidth / (#values - 1)) or 0
+    local previousX = nil
+    local previousY = nil
+
+    for index, value in ipairs(values) do
+        local normalizedY = valueSpan > 0 and ((value - minValue) / valueSpan) or 0.5
+        local x = leftPadding + (#values > 1 and ((index - 1) * xStep) or (graphWidth * 0.5))
+        local y = bottomPadding + (normalizedY * graphHeight)
+
+        if previousX and previousY then
+            local lineTexture = area.lines[index - 1]
+
+            if not lineTexture then
+                lineTexture = area:CreateTexture(nil, "ARTWORK")
+                area.lines[index - 1] = lineTexture
+            end
+
+            local deltaX = x - previousX
+            local deltaY = y - previousY
+            local length = math.sqrt((deltaX * deltaX) + (deltaY * deltaY))
+
+            lineTexture:SetColorTexture(colorR, colorG, colorB, 0.9)
+            lineTexture:ClearAllPoints()
+            lineTexture:SetPoint("CENTER", area, "BOTTOMLEFT", (previousX + x) * 0.5, (previousY + y) * 0.5)
+            lineTexture:SetSize(length, 2)
+            lineTexture:SetRotation(GetAngleRadians(deltaY, deltaX))
+            lineTexture:Show()
+        end
+
+        local pointFrame = area.points[index]
+
+        if not pointFrame then
+            pointFrame = CreateFrame("Frame", nil, area)
+            pointFrame:SetSize(10, 10)
+
+            pointFrame.dot = pointFrame:CreateTexture(nil, "ARTWORK")
+            pointFrame.dot:SetAllPoints()
+            pointFrame.dot:SetTexture("Interface\\Buttons\\WHITE8X8")
+
+            pointFrame:SetScript("OnEnter", function(self)
+                ShowGraphPointTooltip(self)
+
+                self:SetScript("OnUpdate", function(point)
+                    local shiftState = IsShiftKeyDown and IsShiftKeyDown() or false
+                    if shiftState ~= point.lastShiftState then
+                        ShowGraphPointTooltip(point)
+                    end
+                end)
+            end)
+
+            pointFrame:SetScript("OnLeave", function(self)
+                self:SetScript("OnUpdate", nil)
+                self.lastShiftState = nil
+                GameTooltip:Hide()
+            end)
+
+            area.points[index] = pointFrame
+        end
+
+        pointFrame.dot:SetVertexColor(colorR, colorG, colorB, 1)
+        pointFrame.totalCopper = value
+        pointFrame.timestamp = entries[index] and entries[index].timestamp or 0
+        pointFrame.rows = includeRows and entries[index] and entries[index].rows or nil
+        pointFrame.logIndex = index
+        pointFrame.seriesTitle = seriesTitle
+        pointFrame.valueLabel = valueLabel
+        pointFrame:ClearAllPoints()
+        pointFrame:SetPoint("CENTER", area, "BOTTOMLEFT", x, y)
+        pointFrame:Show()
+
+        previousX = x
+        previousY = y
+    end
+end
+
+RenderGraph = function()
+    if not frame then
+        return
+    end
+
+    EnsureGraphWidgets()
+
+    local panel = frame.graphPanel
+    local entries = GUIRL_DB and GUIRL_DB.log and GUIRL_DB.log.entries or {}
+
+    local perRaidValues = {}
+    local cumulativeValues = {}
+    local runningTotal = 0
+
+    for _, entry in ipairs(entries) do
+        local raidTotal = GetGraphEntryTotal(entry)
+        runningTotal = runningTotal + raidTotal
+
+        perRaidValues[#perRaidValues + 1] = raidTotal
+        cumulativeValues[#cumulativeValues + 1] = runningTotal
+    end
+
+    if #entries == 0 then
+        panel.perRaidArea:Hide()
+        panel.cumulativeArea:Hide()
+        panel.emptyText:Show()
+        return
+    end
+
+    panel.perRaidArea:Show()
+    panel.cumulativeArea:Show()
+    panel.emptyText:Hide()
+
+    RenderChartSeries(panel.perRaidArea, entries, perRaidValues, 1, 0.85, 0.2, "Raid", "Total Gold Spent", true)
+    RenderChartSeries(panel.cumulativeArea, entries, cumulativeValues, 0.3, 0.9, 1, "Lifetime", "Cumulative Gold Spent", false)
+end
+
+local function ToggleGraphView()
+    if not frame then
+        return
+    end
+
+    EnsureGraphWidgets()
+
+    if frame.showingGraph then
+        frame.showingGraph = false
+        frame.graphPanel:Hide()
+        ShowUsageList()
+        frame.graphButton:SetText("Graph")
+        RefreshUI()
+    else
+        frame.showingGraph = true
+        HideUsageList()
+        frame.graphPanel:Show()
+        frame.graphButton:SetText("List")
+        RenderGraph()
+    end
+end
+
 function RefreshUI(shouldLog)
     if not frame then
         return
@@ -386,6 +720,11 @@ function RefreshUI(shouldLog)
     end
 
     RenderDisplayRows(displayRows, grandTotal)
+    UpdateRaidSummaryCounters()
+
+    if frame.showingGraph then
+        RenderGraph()
+    end
 end
 
 local function ShowResetPopup()
@@ -502,19 +841,58 @@ local function BuildUI()
     frame.totalValue:SetPoint("LEFT", frame.totalLabel, "RIGHT", 10, 0)
     frame.totalValue:SetText("0g 0s 0c")
 
+    frame.summaryBox = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    frame.summaryBox:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 10, -6)
+    frame.summaryBox:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", -10, -6)
+    frame.summaryBox:SetHeight(42)
+    frame.summaryBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        tile = false,
+        edgeSize = 1,
+    })
+    frame.summaryBox:SetBackdropColor(0.02, 0.02, 0.02, 0.45)
+    frame.summaryBox:SetBackdropBorderColor(1, 1, 1, 0.12)
+
+    frame.lastRaidLabel = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.lastRaidLabel:SetPoint("LEFT", frame.summaryBox, "LEFT", 10, 0)
+    frame.lastRaidLabel:SetText("Gold Used Last Raid:")
+
+    frame.lastRaidValue = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    frame.lastRaidValue:SetPoint("LEFT", frame.lastRaidLabel, "RIGHT", 6, 0)
+    frame.lastRaidValue:SetTextColor(1, 1, 1, 1)
+    frame.lastRaidValue:SetText("0g 0s 0c")
+
+    frame.lifetimeLabel = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.lifetimeLabel:SetPoint("LEFT", frame.lastRaidValue, "RIGHT", 20, 0)
+    frame.lifetimeLabel:SetText("Gold Used Lifetime:")
+
+    frame.lifetimeValue = frame.summaryBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    frame.lifetimeValue:SetPoint("LEFT", frame.lifetimeLabel, "RIGHT", 6, 0)
+    frame.lifetimeValue:SetTextColor(1, 1, 1, 1)
+    frame.lifetimeValue:SetText("0g 0s 0c")
+
     frame.resetButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.resetButton:SetSize(110, 22)
     frame.resetButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 18)
     frame.resetButton:SetText("Reset")
     frame.resetButton:SetScript("OnClick", ShowResetPopup)
 
+    frame.graphButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame.graphButton:SetSize(70, 22)
+    frame.graphButton:SetPoint("RIGHT", frame.resetButton, "LEFT", -8, 0)
+    frame.graphButton:SetText("Graph")
+    frame.graphButton:SetScript("OnClick", ToggleGraphView)
+
     frame.closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.closeButton:SetSize(60, 22)
-    frame.closeButton:SetPoint("RIGHT", frame.resetButton, "LEFT", -8, 0)
+    frame.closeButton:SetPoint("RIGHT", frame.graphButton, "LEFT", -8, 0)
     frame.closeButton:SetText("Close")
     frame.closeButton:SetScript("OnClick", function()
         frame:Hide()
     end)
+
+    UpdateRaidSummaryCounters()
 
     frame:Hide()
 end
