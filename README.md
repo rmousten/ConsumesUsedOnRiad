@@ -1,4 +1,4 @@
-# Gold used In Riad Loser
+# Gold Used In Raid Loser
 
 World of Warcraft addon to track your consumable costs from Auction House prices.
 
@@ -16,7 +16,7 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 2. Install and enable Auctionator.
 3. Launch the game and type `/guirl` to show/hide the window.
 4. Drag the window with left click to move it.
-5. Click `Reset/Log" `Yes/No` prompt for logging before reset.
+5. Click `Reset/Log` and choose `Yes` or `No` in the popup prompt.
 
 ## Refresh logging
 
@@ -51,8 +51,9 @@ World of Warcraft addon to track your consumable costs from Auction House prices
 
 ## Live tracking behavior
 
-- The addon tracks consumed quantity by watching bag count decreases for enabled consumables.
+- The addon tracks consumed quantity from successful player cast events tied to enabled consumables.
 - Tracking is active everywhere by default.
+- Enable `Track Raids Only` in the UI to count consumables only while you are in a raid group.
 
 ## Price source
 - Primary source: Auctionator API.

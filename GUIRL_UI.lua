@@ -10,11 +10,25 @@ local minimapButton
 local eventFrame
 local activeConsumables = {}
 local trackedItemIDs = {}
-local POLL_INTERVAL_SECONDS = 0.5
+local trackedSpellNameToItemIDs = {}
 local MIN_FRAME_WIDTH = 520
 local COLUMN_GAP = 6
 local ADDON_ICON_FILENAME = "Haste_AI.png"
-local LEGACY_TITLE = "Gold used In Riad Loser"
+local ADDON_TITLE = "Gold Used In Raid Loser"
+local RESET_LOG_POPUP_KEY = "GUIRL_RESET_LOG_PROMPT"
+
+local function ShouldMigrateTitle(savedTitle)
+    if type(savedTitle) ~= "string" or savedTitle == "" then
+        return false
+    end
+
+    local normalized = string.lower(savedTitle)
+    normalized = string.gsub(normalized, "[^a-z]", "")
+
+    return normalized == "goldusedinraid"
+        or normalized == "goldusedinraidloser"
+        or normalized == "goldusedinriadloser"
+end
 
 local function GetAddonIconPath()
     local addonFolder = ADDON_NAME or "GUIRL"
@@ -181,108 +195,28 @@ end
 local function RebuildConsumableIndexes()
     activeConsumables = {}
     trackedItemIDs = {}
+    trackedSpellNameToItemIDs = {}
+    local seenItemIDs = {}
 
     for _, consumable in ipairs(GUIRL.Consumables or {}) do
-        if consumable.itemID and consumable.enabled ~= false then
+        if consumable.itemID and consumable.enabled ~= false and not seenItemIDs[consumable.itemID] then
+            seenItemIDs[consumable.itemID] = true
             activeConsumables[#activeConsumables + 1] = consumable
             trackedItemIDs[consumable.itemID] = true
-        end
-    end
-end
 
-local function ExtractItemIDFromLink(itemLink)
-    if not itemLink or type(itemLink) ~= "string" then
-        return nil
-    end
+            local spellName = nil
+            if C_Item and C_Item.GetItemSpell then
+                spellName = C_Item.GetItemSpell(consumable.itemID)
+            elseif GetItemSpell then
+                spellName = GetItemSpell(consumable.itemID)
+            end
 
-    local itemID = string.match(itemLink, "item:(%d+)")
-    if itemID then
-        return tonumber(itemID)
-    end
-
-    return nil
-end
-
-local function GetBagSlotCount(bagID)
-    if C_Container and C_Container.GetContainerNumSlots then
-        return C_Container.GetContainerNumSlots(bagID) or 0
-    end
-
-    if GetContainerNumSlots then
-        return GetContainerNumSlots(bagID) or 0
-    end
-
-    return 0
-end
-
-local function GetBagItemID(bagID, slotID)
-    if C_Container and C_Container.GetContainerItemID then
-        return C_Container.GetContainerItemID(bagID, slotID)
-    end
-
-    if GetContainerItemID then
-        return GetContainerItemID(bagID, slotID)
-    end
-
-    if GetContainerItemLink then
-        local itemLink = GetContainerItemLink(bagID, slotID)
-        return ExtractItemIDFromLink(itemLink)
-    end
-
-    return nil
-end
-
-local function GetBagItemStackCount(bagID, slotID)
-    if C_Container and C_Container.GetContainerItemInfo then
-        local slotInfo = C_Container.GetContainerItemInfo(bagID, slotID)
-        if slotInfo and slotInfo.stackCount and slotInfo.stackCount > 0 then
-            return slotInfo.stackCount
-        end
-    end
-
-    if GetContainerItemInfo then
-        local _, itemCount = GetContainerItemInfo(bagID, slotID)
-        if itemCount and itemCount > 0 then
-            return itemCount
-        end
-    end
-
-    return 1
-end
-
-local function GetTrackedBagCounts()
-    local trackedCounts = {}
-
-    if GetItemCount then
-        for itemID in pairs(trackedItemIDs) do
-            trackedCounts[itemID] = GetItemCount(itemID) or 0
-        end
-
-        return trackedCounts
-    end
-
-    if C_Item and C_Item.GetItemCount then
-        for itemID in pairs(trackedItemIDs) do
-            trackedCounts[itemID] = C_Item.GetItemCount(itemID, false, false, false) or 0
-        end
-
-        return trackedCounts
-    end
-
-    for bagID = 0, (NUM_BAG_SLOTS or 4) do
-        local slotCount = GetBagSlotCount(bagID)
-
-        for slotID = 1, slotCount do
-            local itemID = GetBagItemID(bagID, slotID)
-            if itemID and trackedItemIDs[itemID] then
-                local stackCount = GetBagItemStackCount(bagID, slotID)
-
-                trackedCounts[itemID] = (trackedCounts[itemID] or 0) + stackCount
+            if type(spellName) == "string" and spellName ~= "" then
+                trackedSpellNameToItemIDs[spellName] = trackedSpellNameToItemIDs[spellName] or {}
+                trackedSpellNameToItemIDs[spellName][#trackedSpellNameToItemIDs[spellName] + 1] = consumable.itemID
             end
         end
     end
-
-    return trackedCounts
 end
 
 local function ResetUsageCounts()
@@ -296,47 +230,106 @@ local function ResetTrackedData()
 
     ResetUsageCounts()
     RebuildConsumableIndexes()
-    GUIRL_DB.lastBagSnapshot = GetTrackedBagCounts()
     RefreshUI()
 end
 
-local function UpdateUsageFromBagDelta()
+local function IsTrackingAllowedNow()
+    if not GUIRL or not GUIRL.Settings or not GUIRL.Settings.trackRaidsOnly then
+        return true
+    end
+
+    return IsInRaid and IsInRaid() or false
+end
+
+local function GetCurrentItemCount(itemID)
+    if not itemID then
+        return 0
+    end
+
+    if GetItemCount then
+        return GetItemCount(itemID) or 0
+    end
+
+    if C_Item and C_Item.GetItemCount then
+        return C_Item.GetItemCount(itemID, false, false, false) or 0
+    end
+
+    return 0
+end
+
+local function ResolveTrackedItemForSpell(spellID)
+    if not spellID then
+        return nil
+    end
+
+    local spellName = nil
+    if C_Spell and C_Spell.GetSpellName then
+        spellName = C_Spell.GetSpellName(spellID)
+    elseif GetSpellInfo then
+        spellName = GetSpellInfo(spellID)
+    end
+
+    if type(spellName) ~= "string" or spellName == "" then
+        return nil
+    end
+
+    local candidates = trackedSpellNameToItemIDs[spellName]
+    if not candidates or #candidates == 0 then
+        return nil
+    end
+
+    if #candidates == 1 then
+        return candidates[1]
+    end
+
+    -- If multiple consumables map to the same spell, pick the one most likely used.
+    local bestItemID = candidates[1]
+    local bestCount = GetCurrentItemCount(bestItemID)
+
+    for index = 2, #candidates do
+        local candidateItemID = candidates[index]
+        local candidateCount = GetCurrentItemCount(candidateItemID)
+        if candidateCount > bestCount then
+            bestItemID = candidateItemID
+            bestCount = candidateCount
+        end
+    end
+
+    return bestItemID
+end
+
+local function RecordConsumableUse(itemID)
+    if not itemID or not GUIRL_DB or not GUIRL_DB.usageCounts then
+        return
+    end
+
+    GUIRL_DB.usageCounts[itemID] = (GUIRL_DB.usageCounts[itemID] or 0) + 1
+
+    if frame and frame:IsShown() then
+        RefreshUI()
+    end
+end
+
+local function HandlePlayerSpellcastSucceeded(spellID)
     if not GUIRL_DB or not GUIRL_DB.usageCounts then
+        return
+    end
+
+    if not IsTrackingAllowedNow() then
         return
     end
 
     RebuildConsumableIndexes()
 
-    local currentCounts = GetTrackedBagCounts()
-
-    if not GUIRL_DB.lastBagSnapshot then
-        GUIRL_DB.lastBagSnapshot = currentCounts
+    local itemID = ResolveTrackedItemForSpell(spellID)
+    if not itemID then
         return
     end
 
-    local changed = false
-
-    for itemID in pairs(trackedItemIDs) do
-        local previousCount = GUIRL_DB.lastBagSnapshot[itemID] or 0
-        local currentCount = currentCounts[itemID] or 0
-
-        if currentCount < previousCount then
-            local consumedAmount = previousCount - currentCount
-            GUIRL_DB.usageCounts[itemID] = (GUIRL_DB.usageCounts[itemID] or 0) + consumedAmount
-            changed = true
-        end
-    end
-
-    GUIRL_DB.lastBagSnapshot = currentCounts
-
-    if changed and frame and frame:IsShown() then
-        RefreshUI()
-    end
+    RecordConsumableUse(itemID)
 end
 
 local function HandleRaidStateTransition()
-    GUIRL_DB.lastBagSnapshot = GetTrackedBagCounts()
-
     if frame and frame:IsShown() then
         RefreshUI()
     end
@@ -597,43 +590,34 @@ local function EnsureGraphWidgets()
     end)
 end
 
-local function HideUsageList()
-    frame.content:Hide()
-    frame.headerName:Hide()
-    frame.headerQty:Hide()
-    frame.headerPrice:Hide()
-    frame.headerTotal:Hide()
-    frame.headerSeparator:Hide()
-    frame.totalLabel:Hide()
-    frame.totalValue:Hide()
-    if frame.totalRealLabel then
-        frame.totalRealLabel:Hide()
-    end
-    if frame.totalRealValue then
-        frame.totalRealValue:Hide()
+local function SetElementVisible(element, isVisible)
+    if not element then
+        return
     end
 
-    if frame.rows then
-        for _, row in ipairs(frame.rows) do
-            row:Hide()
-        end
+    if isVisible then
+        element:Show()
+    else
+        element:Hide()
     end
 end
 
-local function ShowUsageList()
-    frame.content:Show()
-    frame.headerName:Show()
-    frame.headerQty:Show()
-    frame.headerPrice:Show()
-    frame.headerTotal:Show()
-    frame.headerSeparator:Show()
-    frame.totalLabel:Show()
-    frame.totalValue:Show()
-    if frame.totalRealLabel then
-        frame.totalRealLabel:Show()
-    end
-    if frame.totalRealValue then
-        frame.totalRealValue:Show()
+local function SetUsageListVisibility(isVisible)
+    SetElementVisible(frame.content, isVisible)
+    SetElementVisible(frame.headerName, isVisible)
+    SetElementVisible(frame.headerQty, isVisible)
+    SetElementVisible(frame.headerPrice, isVisible)
+    SetElementVisible(frame.headerTotal, isVisible)
+    SetElementVisible(frame.headerSeparator, isVisible)
+    SetElementVisible(frame.totalLabel, isVisible)
+    SetElementVisible(frame.totalValue, isVisible)
+    SetElementVisible(frame.totalRealLabel, isVisible)
+    SetElementVisible(frame.totalRealValue, isVisible)
+
+    if frame.rows and not isVisible then
+        for _, row in ipairs(frame.rows) do
+            row:Hide()
+        end
     end
 end
 
@@ -872,12 +856,12 @@ local function ToggleGraphView()
     if frame.showingGraph then
         frame.showingGraph = false
         frame.graphPanel:Hide()
-        ShowUsageList()
+        SetUsageListVisibility(true)
         frame.graphButton:SetText("Graph")
         RefreshUI()
     else
         frame.showingGraph = true
-        HideUsageList()
+        SetUsageListVisibility(false)
         frame.graphPanel:Show()
         frame.graphButton:SetText("List")
         RenderGraph()
@@ -904,8 +888,8 @@ function RefreshUI(shouldLog)
 end
 
 local function ShowResetPopup()
-    if not StaticPopupDialogs["GUIRL_RESET_LOG_PROMPT"] then
-        StaticPopupDialogs["GUIRL_RESET_LOG_PROMPT"] = {
+    if not StaticPopupDialogs[RESET_LOG_POPUP_KEY] then
+        StaticPopupDialogs[RESET_LOG_POPUP_KEY] = {
             text = "Do you want to log before reset?",
             button1 = YES,
             button2 = NO,
@@ -923,7 +907,7 @@ local function ShowResetPopup()
         }
     end
 
-    StaticPopup_Show("GUIRL_RESET_LOG_PROMPT")
+    StaticPopup_Show(RESET_LOG_POPUP_KEY)
 end
 
 BuildUI = function()
@@ -936,7 +920,7 @@ BuildUI = function()
     end
 
     frame = CreateFrame("Frame", "GUIRL_MainFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(GUIRL.Settings.frameWidth, 330)
+    frame:SetSize(GUIRL.Settings.frameWidth, 360)
     frame:SetPoint(GUIRL.Settings.framePoint, UIParent, GUIRL.Settings.framePoint, GUIRL.Settings.frameX, GUIRL.Settings.frameY)
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -1117,7 +1101,7 @@ BuildUI = function()
 
     frame.resetButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.resetButton:SetSize(110, 22)
-    frame.resetButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 18)
+    frame.resetButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 10)
     frame.resetButton:SetText("Reset/Log")
     frame.resetButton:SetScript("OnClick", ShowResetPopup)
 
@@ -1126,6 +1110,18 @@ BuildUI = function()
     frame.graphButton:SetPoint("RIGHT", frame.resetButton, "LEFT", -8, 0)
     frame.graphButton:SetText("Graph")
     frame.graphButton:SetScript("OnClick", ToggleGraphView)
+
+    frame.trackRaidsOnlyButton = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+    frame.trackRaidsOnlyButton:SetPoint("BOTTOMRIGHT", frame.resetButton, "TOPRIGHT", 0, 2)
+    frame.trackRaidsOnlyButton:SetChecked(GUIRL.Settings.trackRaidsOnly == true)
+
+    frame.trackRaidsOnlyLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.trackRaidsOnlyLabel:SetPoint("RIGHT", frame.trackRaidsOnlyButton, "LEFT", -2, 1)
+    frame.trackRaidsOnlyLabel:SetText("Track Raids Only")
+
+    frame.trackRaidsOnlyButton:SetScript("OnClick", function(self)
+        GUIRL.Settings.trackRaidsOnly = self:GetChecked() and true or false
+    end)
 
     frame.closeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame.closeButton:SetSize(60, 22)
@@ -1140,40 +1136,19 @@ BuildUI = function()
     frame:Hide()
 end
 
-local function StartPolling()
-    if eventFrame and eventFrame.pollingActive then
-        return
-    end
-
-    eventFrame.pollingActive = true
-    eventFrame.pollElapsed = 0
-
-    eventFrame:SetScript("OnUpdate", function(_, elapsed)
-        eventFrame.pollElapsed = eventFrame.pollElapsed + elapsed
-        if eventFrame.pollElapsed < POLL_INTERVAL_SECONDS then
-            return
-        end
-
-        eventFrame.pollElapsed = 0
-        UpdateUsageFromBagDelta()
-    end)
-end
-
 eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
-eventFrame:RegisterEvent("BAG_UPDATE")
-eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 
-eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
-    if event == "ADDON_LOADED" and loadedAddonName == ADDON_NAME then
+eventFrame:SetScript("OnEvent", function(_, event, ...)
+    local arg1 = ...
+
+    if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
         GUIRL_DB = GUIRL_DB or CUOR_DB or {}
         CUOR_DB = GUIRL_DB
         GUIRL_DB.settings = GUIRL_DB.settings or {}
         GUIRL_DB.usageCounts = GUIRL_DB.usageCounts or {}
-        GUIRL_DB.lastBagSnapshot = GUIRL_DB.lastBagSnapshot or nil
         if GUIRL.Log and GUIRL.Log.Initialize then
             GUIRL.Log.Initialize(GUIRL_DB)
         end
@@ -1184,9 +1159,9 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
             end
         end
 
-        -- Migrate legacy typo from older saved settings.
-        if GUIRL_DB.settings.title == LEGACY_TITLE then
-            GUIRL_DB.settings.title = GUIRL.Settings.title
+        -- Migrate old title variants to one canonical addon title.
+        if ShouldMigrateTitle(GUIRL_DB.settings.title) then
+            GUIRL_DB.settings.title = ADDON_TITLE
         end
 
         GUIRL.Settings = GUIRL_DB.settings
@@ -1196,11 +1171,13 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
         if GUIRL.Settings.minimapAngle == nil then
             GUIRL.Settings.minimapAngle = 225
         end
+        if GUIRL.Settings.trackRaidsOnly == nil then
+            GUIRL.Settings.trackRaidsOnly = false
+        end
         RebuildConsumableIndexes()
         BuildUI()
         CreateMinimapButton()
         HandleRaidStateTransition()
-        StartPolling()
     end
 
     if event == "PLAYER_ENTERING_WORLD" and frame then
@@ -1210,14 +1187,10 @@ eventFrame:SetScript("OnEvent", function(_, event, loadedAddonName)
 
 
 
-    if event == "BAG_UPDATE_DELAYED" or event == "BAG_UPDATE" then
-        UpdateUsageFromBagDelta()
-    end
-
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
-        local unitToken = loadedAddonName
+        local unitToken, _, spellID = ...
         if unitToken == "player" then
-            UpdateUsageFromBagDelta()
+            HandlePlayerSpellcastSucceeded(spellID)
         end
     end
 end)
